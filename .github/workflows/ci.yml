@@ -30,6 +30,8 @@ jobs:
 
       - name: Booking service unit tests
         working-directory: booking-service
+        env:
+          PYTHONPATH: ${{ github.workspace }}/booking-service
         run: pytest -q tests
 
       - name: Flight service unit tests
