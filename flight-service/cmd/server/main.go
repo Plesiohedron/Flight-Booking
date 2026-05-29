@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -31,6 +33,7 @@ func getEnv(key, defaultVal string) string {
 func main() {
 	databaseURL := getEnv("DATABASE_URL", "postgres://postgres:postgres@localhost:5432/flights?sslmode=disable")
 	grpcPort := getEnv("GRPC_PORT", "50051")
+	metricsPort := getEnv("METRICS_PORT", "9100")
 	redisURL := getEnv("REDIS_URL", "redis://redis:6379")
 	apiKey := getEnv("API_KEY", "")
 
@@ -73,16 +76,29 @@ func main() {
 	redisCache := cache.New(redisClient)
 	svc := server.New(repo, redisCache)
 
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		})
+		log.Printf("metrics server listening on :%s", metricsPort)
+		if err := http.ListenAndServe(":"+metricsPort, mux); err != nil {
+			log.Fatalf("failed to serve metrics: %v", err)
+		}
+	}()
+
 	// Build gRPC server with optional auth interceptor
 	var grpcServer *grpc.Server
 	if apiKey != "" {
 		authInterceptor := server.NewAuthInterceptor(apiKey)
 		grpcServer = grpc.NewServer(
-			grpc.UnaryInterceptor(authInterceptor.Unary()),
+			grpc.ChainUnaryInterceptor(server.MetricsUnaryInterceptor(), authInterceptor.Unary()),
 		)
 		log.Printf("Auth interceptor enabled (API key required)")
 	} else {
-		grpcServer = grpc.NewServer()
+		grpcServer = grpc.NewServer(grpc.UnaryInterceptor(server.MetricsUnaryInterceptor()))
 		log.Println("Auth interceptor disabled (no API_KEY set)")
 	}
 

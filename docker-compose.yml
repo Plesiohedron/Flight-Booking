@@ -47,10 +47,12 @@ services:
     environment:
       DATABASE_URL: "postgres://postgres:postgres@flight-db:5432/flights?sslmode=disable"
       GRPC_PORT: "50051"
+      METRICS_PORT: "9100"
       REDIS_URL: "redis://redis:6379"
       API_KEY: "secret-key"
     ports:
       - "50051:50051"
+      - "9100:9100"
     depends_on:
       flight-db:
         condition: service_healthy
@@ -70,6 +72,73 @@ services:
       booking-db:
         condition: service_healthy
       flight-service:
+        condition: service_started
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - booking-service
+      - flight-service
+      - flight-postgres-exporter
+      - booking-postgres-exporter
+      - redis-exporter
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+
+  flight-postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@flight-db:5432/flights?sslmode=disable"
+    depends_on:
+      flight-db:
+        condition: service_healthy
+
+  booking-postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://postgres:postgres@booking-db:5432/bookings?sslmode=disable"
+    depends_on:
+      booking-db:
+        condition: service_healthy
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.67.0
+    environment:
+      REDIS_ADDR: "redis://redis:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  load-tester:
+    image: grafana/k6:0.55.0
+    profiles: ["test"]
+    environment:
+      BOOKING_API_URL: "http://booking-service:8000"
+    volumes:
+      - ./load:/scripts:ro
+      - ./load-results:/home/k6/load-results
+    command: ["run", "/scripts/bookings.js"]
+    depends_on:
+      booking-service:
         condition: service_started
 
 volumes:

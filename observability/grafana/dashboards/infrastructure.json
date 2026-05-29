@@ -1,0 +1,55 @@
+{
+  "uid": "flight-booking-infra",
+  "title": "Flight Booking Infrastructure",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "PostgreSQL Active Connections",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "targets": [{"expr": "sum(pg_stat_activity_count{datname=~\"flights|bookings\"}) by (job, datname)", "legendFormat": "{{job}} {{datname}}"}]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "PostgreSQL Cache Hit Ratio",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "targets": [{"expr": "100 * sum(rate(pg_stat_database_blks_hit{datname=~\"flights|bookings\"}[5m])) by (job, datname) / clamp_min(sum(rate(pg_stat_database_blks_hit{datname=~\"flights|bookings\"}[5m]) + rate(pg_stat_database_blks_read{datname=~\"flights|bookings\"}[5m])) by (job, datname), 0.001)", "legendFormat": "{{job}} {{datname}}"}],
+      "fieldConfig": {"defaults": {"unit": "percent"}}
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "PostgreSQL Transactions Per Second",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "targets": [{"expr": "sum(rate(pg_stat_database_xact_commit{datname=~\"flights|bookings\"}[1m]) + rate(pg_stat_database_xact_rollback{datname=~\"flights|bookings\"}[1m])) by (job, datname)", "legendFormat": "{{job}} {{datname}}"}]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Redis Ops Per Second",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [{"expr": "rate(redis_commands_processed_total[1m])", "legendFormat": "redis ops"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Redis Memory Used",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [{"expr": "redis_memory_used_bytes", "legendFormat": "redis memory"}],
+      "fieldConfig": {"defaults": {"unit": "bytes"}}
+    }
+  ]
+}

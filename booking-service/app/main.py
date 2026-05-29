@@ -9,12 +9,31 @@ Responsibilities:
 import glob
 import os
 import os.path
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 from app.database import get_raw_connection
 from app.routes import router
+
+
+HTTP_REQUESTS_TOTAL = Counter(
+    "http_requests_total",
+    "Total HTTP requests handled by booking-service",
+    ["method", "endpoint", "status"],
+)
+HTTP_REQUEST_ERRORS_TOTAL = Counter(
+    "http_request_errors_total",
+    "Total HTTP request errors handled by booking-service",
+    ["method", "endpoint", "error_type"],
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "http_request_duration_seconds",
+    "HTTP request duration in seconds for booking-service",
+    ["method", "endpoint"],
+)
 
 
 def run_migrations():
@@ -59,7 +78,35 @@ app = FastAPI(
 app.include_router(router)
 
 
+@app.middleware("http")
+async def prometheus_middleware(request: Request, call_next):
+    if request.url.path == "/metrics":
+        return await call_next(request)
+
+    started = time.perf_counter()
+    method = request.method
+    status = "500"
+    try:
+        response = await call_next(request)
+        status = str(response.status_code)
+        if response.status_code >= 400:
+            HTTP_REQUEST_ERRORS_TOTAL.labels(method, endpoint, f"http_{status}").inc()
+        return response
+    except Exception:
+        HTTP_REQUEST_ERRORS_TOTAL.labels(method, endpoint, "unhandled_exception").inc()
+        raise
+    finally:
+        endpoint = request.scope.get("route").path if request.scope.get("route") else request.url.path
+        HTTP_REQUESTS_TOTAL.labels(method, endpoint, status).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(method, endpoint).observe(time.perf_counter() - started)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics():
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
